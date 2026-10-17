@@ -63,6 +63,19 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({
     }
   };
 
+  // Automatically send purchase invoice to customer's email upon creation
+  useEffect(() => {
+    if (order && order.customerEmail) {
+      fetch('/api/email/send-invoice', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(order),
+      }).catch((err) => {
+        console.warn('[InvoiceModal] Background invoice email send failed:', err);
+      });
+    }
+  }, [order?.invoiceNumber]);
+
   useEffect(() => {
     const handleUpdate = (e: any) => {
       setCsConfig(e.detail || getCSConfig());

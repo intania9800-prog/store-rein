@@ -270,7 +270,43 @@ async function startServer() {
     const email = customerEmail || 'pelanggan@gmail.com';
     console.log(`[Email Service] Invoice ${invoiceNumber} processing for: ${email}`);
 
-    if (mailTransporter && customerEmail) {
+    // 1. Try Resend API (No App Password needed - just RESEND_API_KEY)
+    if (process.env.RESEND_API_KEY && customerEmail) {
+      try {
+        await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            from: 'Reinstore Official <onboarding@resend.dev>',
+            to: customerEmail,
+            subject: `[Reinstore] Invoice Pembelian #${invoiceNumber} - Berhasil`,
+            html: `
+              <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; background: #0b1126; color: #f1f5f9; border-radius: 16px; border: 1px solid #1e293b;">
+                <h2 style="color: #00A3FF; margin-top: 0;">REINSTORE OFFICIAL</h2>
+                <h3 style="color: #10b981;">Bukti Transaksi & Invoice Pembelian</h3>
+                <p>Halo Pelanggan Terhormat,</p>
+                <p>Pembayaran Anda telah diverifikasi secara instan dan pesanan telah berhasil diproses.</p>
+                <div style="background: #101935; padding: 16px; border-radius: 12px; margin: 16px 0; border: 1px solid #1e293b;">
+                  <p style="margin: 6px 0;"><strong>No. Invoice:</strong> ${invoiceNumber}</p>
+                  <p style="margin: 6px 0;"><strong>Produk:</strong> ${productName} (${variantName})</p>
+                  <p style="margin: 6px 0;"><strong>Tujuan / ID:</strong> ${targetAccount}</p>
+                  <p style="margin: 6px 0;"><strong>Metode:</strong> ${paymentMethod.toUpperCase()}</p>
+                  <p style="margin: 6px 0; font-size: 16px; color: #38bdf8;"><strong>Total:</strong> Rp ${Number(totalAmount).toLocaleString('id-ID')}</p>
+                  <p style="margin: 6px 0; color: #10b981; font-weight: bold;">Status: LUNAS & TERVERIFIKASI</p>
+                </div>
+                <p style="font-size: 12px; color: #94a3b8;">Email ini merupakan bukti pembayaran resmi yang sah dari Reinstore.</p>
+              </div>
+            `,
+          }),
+        });
+        console.log(`[Email Service] Live invoice sent via Resend API to: ${customerEmail}`);
+      } catch (resendErr) {
+        console.warn('[Email Service] Resend API error:', resendErr);
+      }
+    } else if (mailTransporter && customerEmail) {
       try {
         await mailTransporter.sendMail({
           from: `"Reinstore Official" <${process.env.SMTP_USER}>`,
@@ -325,7 +361,48 @@ async function startServer() {
 
     console.log(`[OTP Service] OTP Code generated for Gmail: ${targetEmail}`);
 
-    if (mailTransporter) {
+    let emailSentSuccessfully = false;
+
+    // 1. Try Resend API (No App Password needed - just RESEND_API_KEY)
+    if (process.env.RESEND_API_KEY) {
+      try {
+        await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            from: 'Reinstore Security <onboarding@resend.dev>',
+            to: targetEmail,
+            subject: `[Reinstore] Kode Verifikasi OTP Anda: ${otp}`,
+            html: `
+              <div style="font-family: sans-serif; max-width: 520px; margin: 0 auto; padding: 24px; background: #0b1126; color: #f1f5f9; border-radius: 16px; border: 1px solid #1e293b;">
+                <div style="text-align: center; margin-bottom: 20px;">
+                  <h2 style="color: #00A3FF; margin: 0;">REINSTORE</h2>
+                  <p style="color: #94a3b8; font-size: 13px; margin: 4px 0 0 0;">Verifikasi Masuk & Akun Resmi</p>
+                </div>
+                <p>Halo,</p>
+                <p style="color: #cbd5e1; line-height: 1.5;">Gunakan kode OTP 6 digit berikut untuk memverifikasi akun Reinstore Anda:</p>
+                <div style="background: #111e42; border: 1px solid #00A3FF; border-radius: 12px; padding: 18px; text-align: center; margin: 20px 0;">
+                  <span style="font-family: monospace; font-size: 32px; font-weight: 900; letter-spacing: 8px; color: #38bdf8;">${otp}</span>
+                </div>
+                <p style="font-size: 12px; color: #94a3b8; line-height: 1.5;">
+                  Kode ini berlaku selama <strong>10 menit</strong>. Jangan pernah membagikan kode ini kepada siapa pun.
+                </p>
+              </div>
+            `,
+          }),
+        });
+        emailSentSuccessfully = true;
+        console.log(`[OTP Service] Live OTP email delivered via Resend API to ${targetEmail}`);
+      } catch (resendErr) {
+        console.warn(`[OTP Service] Failed to send OTP via Resend API:`, resendErr);
+      }
+    }
+
+    // 2. Try SMTP if configured and not sent by Resend
+    if (!emailSentSuccessfully && mailTransporter) {
       try {
         await mailTransporter.sendMail({
           from: `"Keamanan Akun Reinstore" <${process.env.SMTP_USER}>`,
@@ -352,8 +429,8 @@ async function startServer() {
       } catch (mailErr) {
         console.warn(`[OTP Service] Failed to send email via SMTP (will verify in-memory):`, mailErr);
       }
-    } else {
-      console.log(`[OTP Service] SMTP not configured. OTP stored securely in-memory for ${targetEmail}. (Code: ${otp})`);
+    } else if (!emailSentSuccessfully) {
+      console.log(`[OTP Service] Email service not configured. OTP stored securely in-memory for ${targetEmail}. (Code: ${otp})`);
     }
 
     // Notice: Do NOT return the plain OTP code to the frontend!
